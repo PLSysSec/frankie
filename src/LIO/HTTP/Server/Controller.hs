@@ -40,13 +40,12 @@ module LIO.HTTP.Server.Controller (
   Controller(..),
   ControllerStatus(..),
   tryController,
-  -- * DC Label specific type alias
-  DCController
+  -- -- * DC Label specific type alias
+  -- DCController
   ) where
 
 import Prelude hiding (log)
-import LIO.DCLabel
-import LIO.Exception
+import Control.Exception (SomeException)
 import LIO.HTTP.Server
 import LIO.HTTP.Server.Responses
 
@@ -134,8 +133,8 @@ tryController ctrl = Controller $ \s0 logger req -> do
       Working a -> return (Working (Right a), s1)
       Done r    -> return (Done r, s1)
 
--- | DC-labeled controller
-type DCController s = Controller s DC ()
+-- -- | DC-labeled controller
+-- type DCController s = Controller s DC ()
 
 --
 -- requests/responses

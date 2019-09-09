@@ -1,5 +1,4 @@
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -31,23 +30,23 @@ extended to make it easy to securely stream data in the future.
 -}
 module LIO.HTTP.Server (
   -- * Handle requests in the WebMonad
-  WebMonad(..), Request(..), Response(..),
+  WebMonad(..), Response(..),
   Application, Middleware,
   -- * General networking types 
   Port, HostPreference,
   module Network.HTTP.Types,
-  -- * DC Label specific
-  DCRequest, DCApplication, DCMiddleware
+  -- -- * DC Label specific
+  -- DCRequest, DCApplication, DCMiddleware
   ) where
 import Network.HTTP.Types
 import Data.Text (Text)
-import qualified Data.Text as Text
-import LIO.DCLabel
-import LIO.TCB (ioTCB)
-import LIO.Exception
+-- import qualified Data.Text as Text
+-- import LIO.DCLabel
+-- import LIO.TCB (ioTCB)
+import Control.Exception (SomeException)
 import Network.Wai.Handler.Warp (Port, HostPreference)
-import qualified Network.Wai as Wai
-import qualified Network.Wai.Handler.Warp as Wai
+-- import qualified Network.Wai as Wai
+-- import qualified Network.Wai.Handler.Warp as Wai
 import qualified Data.ByteString.Lazy as Lazy
 
 
@@ -107,47 +106,47 @@ type Middleware m  = Application m -> Application m
 
 --  LIO specific code:
 
--- | Instace for the DC monad, wrapping the Wai interface and using the warp
--- server to serve requests. Note that the initial current label and clearance
--- are those provided by `evalDC`. Middleware should be used to change the
--- current label or clearance. Middleware should also be used to label the
--- request if secrecy/integrity is a concern.
-instance WebMonad DC where
-  data Request DC = RequestTCB { unRequestTCB :: Wai.Request }
-  reqMethod      = Wai.requestMethod . unRequestTCB
-  reqHttpVersion = Wai.httpVersion . unRequestTCB
-  reqPathInfo    = Wai.pathInfo . unRequestTCB
-  reqQueryString = Wai.queryString . unRequestTCB
-  reqHeaders     = Wai.requestHeaders . unRequestTCB
-  reqBody        = ioTCB . Wai.strictRequestBody . unRequestTCB
-  tryWeb act     = do er <- try act
-                      case er of
-                        Left e -> return . Left . toException $ e
-                        r -> return r
-  server port hostPref app = 
-    let settings = Wai.setHost hostPref $ Wai.setPort port $ 
-                   Wai.setServerName "lio-http-server" $ Wai.defaultSettings
-    in Wai.runSettings settings $ toWaiApplication app
+-- -- | Instace for the DC monad, wrapping the Wai interface and using the warp
+-- -- server to serve requests. Note that the initial current label and clearance
+-- -- are those provided by `evalDC`. Middleware should be used to change the
+-- -- current label or clearance. Middleware should also be used to label the
+-- -- request if secrecy/integrity is a concern.
+-- instance WebMonad DC where
+--   data Request DC = RequestTCB { unRequestTCB :: Wai.Request }
+--   reqMethod      = Wai.requestMethod . unRequestTCB
+--   reqHttpVersion = Wai.httpVersion . unRequestTCB
+--   reqPathInfo    = Wai.pathInfo . unRequestTCB
+--   reqQueryString = Wai.queryString . unRequestTCB
+--   reqHeaders     = Wai.requestHeaders . unRequestTCB
+--   reqBody        = ioTCB . Wai.strictRequestBody . unRequestTCB
+--   tryWeb act     = do er <- try act
+--                       case er of
+--                         Left e -> return . Left . toException $ e
+--                         r -> return r
+--   server port hostPref app =
+--     let settings = Wai.setHost hostPref $ Wai.setPort port $
+--                    Wai.setServerName "lio-http-server" $ Wai.defaultSettings
+--     in Wai.runSettings settings $ toWaiApplication app
 
--- | Type alias for DCApplication requets
-type DCRequest = Request DC
+-- -- | Type alias for DCApplication requets
+-- type DCRequest = Request DC
 
--- | Type alias for DC-labeled applications
-type DCApplication = Application DC
+-- -- | Type alias for DC-labeled applications
+-- type DCApplication = Application DC
 
--- | Type alias for DC-labeled middleware
-type DCMiddleware = Middleware DC
+-- -- | Type alias for DC-labeled middleware
+-- type DCMiddleware = Middleware DC
  
--- | Internal function for converting a DCApplication to a Wai Application
-toWaiApplication :: DCApplication -> Wai.Application
-toWaiApplication dcApp wReq wRespond = do
-  resp <- evalDC $ dcApp $ req
-  wRespond $ toWaiResponse resp
-    where req :: Request DC
-          req = let pI0 = Wai.pathInfo wReq
-                    pI1 = if (not . null $ pI0) && (last pI0 == Text.empty)
-                            then init pI0
-                            else pI0
-                in RequestTCB $ wReq { Wai.pathInfo = pI1 }
-          toWaiResponse :: Response -> Wai.Response
-          toWaiResponse (Response status headers body) = Wai.responseLBS status headers body
+-- -- | Internal function for converting a DCApplication to a Wai Application
+-- toWaiApplication :: DCApplication -> Wai.Application
+-- toWaiApplication dcApp wReq wRespond = do
+--   resp <- evalDC $ dcApp $ req
+--   wRespond $ toWaiResponse resp
+--     where req :: Request DC
+--           req = let pI0 = Wai.pathInfo wReq
+--                     pI1 = if (not . null $ pI0) && (last pI0 == Text.empty)
+--                             then init pI0
+--                             else pI0
+--                 in RequestTCB $ wReq { Wai.pathInfo = pI1 }
+--           toWaiResponse :: Response -> Wai.Response
+--           toWaiResponse (Response status headers body) = Wai.responseLBS status headers body
