@@ -53,6 +53,7 @@ import Data.Maybe
 import Data.Map (Map)
 import Data.List (intercalate)
 import Data.Text (Text)
+import Data.Typeable (TypeRep, typeRepArgs, typeOf)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Map as Map

@@ -2,6 +2,4 @@ flags: {}
 extra-package-dbs: []
 packages:
 - .
-extra-deps:
-- lio-0.11.6.0
-resolver: lts-8.8
+resolver: lts-13.20
