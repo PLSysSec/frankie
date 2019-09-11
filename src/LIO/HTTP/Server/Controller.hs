@@ -1,9 +1,9 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 {- | 'Controller' provides a convenient syntax for writting
    'Application' code as a Monadic action with access to an HTTP
@@ -22,19 +22,15 @@
   @
 -}
 module LIO.HTTP.Server.Controller (
+  MonadController(..),
   -- * Request relate accessors
-  request,
   requestHeader,
   queryParams, Parseable(..),
   -- * Response related accessors
-  respond,
   redirectBack,
   redirectBackOr,
   -- * App-specific logging
-  log,
   Logger(..), LogLevel(..),
-  -- * App-specific state accessors
-  getAppState, putAppState,
   -- * Internal controller monad
   fromApp, toApp,
   Controller(..),
@@ -51,8 +47,6 @@ import LIO.HTTP.Server.Responses
 
 import Control.Applicative ()
 import Control.Monad
-import Control.Monad.Reader.Class
-import Control.Monad.State.Class
 import Control.Monad.Trans.Class
 
 import Data.Maybe
@@ -108,16 +102,26 @@ instance Monad m => Monad (Controller s m) where
         let (Controller act1) = fn v
         act1 st1 logger req
 
-instance Monad m => MonadState s (Controller s m) where
-  get   = Controller $ \s _ _ -> return (Working s, s)
-  put s = Controller $ \_ _ _ -> return (Working (), s)
-
-instance Monad m => MonadReader (Request m) (Controller s m) where
-  ask = Controller $ \st _ req -> return (Working req, st)
-  local f (Controller act) = Controller $ \st logger req -> act st logger (f req)
-
 instance MonadTrans (Controller s) where
   lift act = Controller $ \st _ _ -> act >>= \r -> return (Working r, st)
+
+class (Monad m, WebMonad w) => MonadController s w m | m -> s w where
+  request :: m (Request w)
+  respond :: Response -> m a
+  getAppState :: m s
+  putAppState :: s -> m ()
+  log :: LogLevel -> String -> m ()
+  liftWeb :: w a -> m a
+
+instance WebMonad n => MonadController s n (Controller s n) where
+  request = Controller $ \st _ req -> return (Working req, st)
+  respond resp = Controller $ \st _ _ -> return (Done resp, st)
+  getAppState = Controller $ \st _ _ -> return (Working st, st)
+  putAppState st = Controller $ \_ _ _ -> return (Working (), st)
+  log level str = Controller $ \s0 (Logger logger) _ -> do
+    logger level str
+    return (Working (), s0)
+  liftWeb = lift
 
 -- | Try executing the controller action, returning the result or raised
 -- exception. Note that exceptions restore the state.
@@ -140,31 +144,31 @@ tryController ctrl = Controller $ \s0 logger req -> do
 -- requests/responses
 --
 
--- | Extract the current request.
-request :: Monad m => Controller s m (Request m)
-request = ask
+-- -- | Extract the current request.
+-- request :: Monad m => Controller s m (Request m)
+-- request = ask
 
--- | Produce a response. Note that the first such response in a monadic
--- action wins and the remainder of the controller will not execute.
---
--- @respond r >>= f === respond r@
-respond :: Monad m => Response -> Controller s m a
-respond resp = Controller $ \s _ _ -> return (Done resp, s)
+-- -- | Produce a response. Note that the first such response in a monadic
+-- -- action wins and the remainder of the controller will not execute.
+-- --
+-- -- @respond r >>= f === respond r@
+-- respond :: Monad m => Response -> Controller s m a
+-- respond resp = Controller $ \s _ _ -> return (Done resp, s)
 
--- | Extract the application-specific state.
-getAppState :: Monad m => Controller s m s
-getAppState = get
+-- -- | Extract the application-specific state.
+-- getAppState :: Monad m => Controller s m s
+-- getAppState = get
 
--- | Set the application-specific state.
-putAppState :: Monad m => s -> Controller s m ()
-putAppState = put
+-- -- | Set the application-specific state.
+-- putAppState :: Monad m => s -> Controller s m ()
+-- putAppState = put
 
 -- | Convert an application to a controller. Internally, this uses
 -- 'respond' to produce the response.
-fromApp :: Monad m => Application m -> Controller s m ()
+fromApp :: MonadController s w m => Application w -> m ()
 fromApp app = do
   req <- request
-  resp <- lift $ app req
+  resp <- liftWeb $ app req
   respond resp
 
 -- | Convert the controller into an 'Application'. This can be used to
@@ -188,11 +192,11 @@ toApp ctrl s0 logger req = do
 -- would return @["bar"]@, but
 -- @queryParam \"zap\"@
 -- would return @[]@.
-queryParams :: (WebMonad m, Parseable a)
+queryParams :: (MonadController s w m, Parseable a)
             => Strict.ByteString -- ^ Parameter name
-            -> Controller s m [a]
+            -> m [a]
 queryParams varName = do
-  query <- liftM reqQueryString request
+  query <- reqQueryString <$> request
   return $ mapMaybe go query
     where go (name, mparam) = if name == varName
                                 then mparam >>= parseBS
@@ -248,11 +252,11 @@ redirectBackOr def = do
     Just refr -> respond $ redirectTo refr
     Nothing   -> respond def
 
--- | Log text using app-specific logger.
-log :: WebMonad m => LogLevel -> String -> Controller s m ()
-log level str = Controller $ \s0 (Logger logger) _ -> do
-   logger level str
-   return (Working (), s0)
+-- -- | Log text using app-specific logger.
+-- log :: WebMonad m => LogLevel -> String -> Controller s m ()
+-- log level str = Controller $ \s0 (Logger logger) _ -> do
+--    logger level str
+--    return (Working (), s0)
 
 -- | A logger is simply a function that takes the 'LogLevel' and string to
 -- write, and produces an action which when executed may log the string. What

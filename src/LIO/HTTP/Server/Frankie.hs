@@ -117,20 +117,20 @@ fallback controller = FrankieConfigDispatch $ do
 --
 
 -- | On parse failure, respond with 400, bad request.
-parseFailed :: Monad m => Controller s m a
+parseFailed :: MonadController s w m => m a
 parseFailed = respond badRequest
 
 -- | This action produces a server error response. This response indicates a
 -- bug in this server implementation.
-invalidArgs :: Monad m => Controller s m ()
+invalidArgs :: MonadController s w m => m ()
 invalidArgs = respond $ serverError "BUG: controller called with invalid args"
 
 -- | Get the path variable or fail with parser error
-pathVarOrFail :: (WebMonad m, Parseable a)
+pathVarOrFail :: (MonadController s w m, Parseable a)
               => PathSegment -- ^ Parameter name
-              -> Controller s m a
+              -> m a
 pathVarOrFail ps = do
-  pathInfo <- liftM reqPathInfo request
+  pathInfo <- reqPathInfo <$> request
   case ps of
     (Var _ idx) | idx < length pathInfo ->
       case parseText (pathInfo!!idx) of
