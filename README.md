@@ -1,0 +1,73 @@
+Frankie is a simple Web server and routing framework. The server lets your run
+your app in your custom monad, not just IO. The framework is
+configuration-driven and ensure that controllers are well-typed (vs. frameworks
+like Sinatra where you'd have to parse URL query parameters).
+
+Below is a simple illustrative example (at least until this README is actually written).
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+import Prelude hiding (log)
+import HTTP.Server.IO
+import HTTP.Server.Frankie
+import HTTP.Server.Frankie.Loggers
+
+main :: IO ()
+main = runFrankieServer "prod" $ do
+  mode "prod" $ do
+    host "*"
+    port 3030
+    appState ()
+    logger DEBUG stdErrLogger
+    openFileLogger "/tmp/frankie.log.0" >>= logger INFO
+      
+  mode "dev" $ do
+    host "127.0.0.1"
+    port 3000
+    appState ()
+  --
+  dispatch $ do
+    get "/" top
+    get "/a/b" top
+    get "/fail" doFail
+    get "/users/:uid" showUser
+    get "/users/:uid/posts/:pid" showUserPost
+    fallback $ do
+      req <- request
+      log WARNING $ "Not sure how to handle: " ++ show req
+      respond $ notFound
+  --
+  onError $ \err -> do
+    log ERROR $ "Controller failed with " ++ displayException err
+    respond $ serverError "bad bad nab"
+
+top :: IOController s
+top = respond $ okHtml "Woot"
+
+showUser :: Int -> IOController ()
+showUser uid = do
+  log INFO $ "uid = " ++ show uid
+  respond $ okHtml "showUser done!"
+
+newtype PostId = PostId Int
+   deriving Eq
+
+instance Show PostId where
+   show (PostId i) = show i
+
+instance Parseable PostId where
+  parseText t = case parseText t of
+                  Just i | i > 0 -> Just (PostId i)
+                  _ -> Nothing
+
+showUserPost :: Int -> PostId -> IOController ()
+showUserPost uid pid = do
+  log INFO $ "uid = " ++ show uid
+  log INFO $ "pid = " ++ show pid
+  respond $ okHtml "showUserPost done!"
+
+doFail :: IOController ()
+doFail = do
+  log DEBUG $ "about to throw an exception"
+  fail "w00t"
+```
