@@ -7,6 +7,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PolyKinds #-}
 module LIO.HTTP.Server.Frankie (
   -- * Top-level interface
   FrankieConfig(..), FrankieConfigDispatch(..),
@@ -53,7 +58,7 @@ import Data.Maybe
 import Data.Map (Map)
 import Data.List (intercalate)
 import Data.Text (Text)
-import Data.Typeable (TypeRep, typeRepArgs, typeOf)
+import Type.Reflection (TypeRep, SomeTypeRep(..), typeRep, pattern Fun)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Map as Map
@@ -146,10 +151,10 @@ class (Monad m, Typeable h) => RequestHandler h s m | h -> s m where
   handlerToController :: [PathSegment] -> h -> Controller s m ()
 
   -- | The types for the arugments the handler takes
-  reqHandlerArgTy :: h -> FrankieConfig s m [TypeRep]
-  reqHandlerArgTy f = return . getArgs' .  typeRepArgs $ typeOf f
-    where getArgs' :: [TypeRep] -> [TypeRep]
-          getArgs' [a, b] = a : (getArgs' $ typeRepArgs b)
+  reqHandlerArgTy :: FrankieConfig s m [SomeTypeRep]
+  reqHandlerArgTy = return . getArgs' $ typeRep @h
+    where getArgs' :: TypeRep a -> [SomeTypeRep]
+          getArgs' (Fun arg rest) = SomeTypeRep arg : getArgs' rest
           getArgs' _      = []
 
 instance (Typeable s, WebMonad m, Typeable m)
@@ -167,7 +172,7 @@ instance (Parseable a, Typeable a, RequestHandler c s m, WebMonad m)
 
 
 -- | Register a handler for the particular method and path.
-regMethodHandler :: RequestHandler h s m
+regMethodHandler :: forall h s m. RequestHandler h s m
                  => Method -> Text -> h -> FrankieConfig s m ()
 regMethodHandler method path handler = do
   cfg <- State.get
@@ -178,7 +183,7 @@ regMethodHandler method path handler = do
   when (isJust $ Map.lookup key0 map0) $
     cfgFail $ "Already have handler for: " ++ show (method, segments)
   -- Make sure that the controller and number of vars match (liquid?)
-  args <- reqHandlerArgTy handler
+  args <- reqHandlerArgTy @h
   let vars   = filter isVar segments
       nrVars = length vars
       nrArgs = length args
@@ -195,7 +200,7 @@ regMethodHandler method path handler = do
 -- types are sorted according to the variables the represent.  Called by
 -- regMethodHandler. Usage outside this is discouraged.
 fixSegments :: [PathSegment]
-            -> [TypeRep]
+            -> [SomeTypeRep]
             -> [PathSegment]
 fixSegments (Var n0 i0 : ss) (ty : ts) =
   let n0' = n0 `Text.append` (Text.pack $ '@' : show ty)
