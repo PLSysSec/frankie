@@ -1,4 +1,4 @@
-name:                lio-http-server
+name:                frankie
 version:             0.0.0.1
 synopsis:            Simple HTTP server running in the LIO monad.
 description:         Simple, but general HTTP server implementation that works
