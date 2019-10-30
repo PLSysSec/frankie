@@ -16,11 +16,11 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     LIO.HTTP.Server,
-                       LIO.HTTP.Server.Responses,
-                       LIO.HTTP.Server.Controller,
-                       LIO.HTTP.Server.Frankie,
-                       LIO.HTTP.Server.Frankie.Loggers
+  exposed-modules:     Frankie,
+                       Frankie.Server,
+                       Frankie.Responses,
+                       Frankie.Controller,
+                       Frankie.Loggers
   build-depends:       ansi-terminal >= 0.6.2.1,
                        base          >= 4.7 && < 6,
                        bytestring    >= 0.10,
@@ -54,4 +54,4 @@ extra-source-files
 
 source-repository head
   type:     git
-  location: https://github.com/plsyssec/lio
+  location: https://github.com/rosekunkel/frankie

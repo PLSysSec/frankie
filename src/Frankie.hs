@@ -12,7 +12,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE PolyKinds #-}
-module LIO.HTTP.Server.Frankie (
+module Frankie (
   -- * Top-level interface
   FrankieConfig(..), FrankieConfigDispatch(..),
   runFrankieServer,
@@ -39,14 +39,14 @@ module LIO.HTTP.Server.Frankie (
   PathSegment(..), toPathSegments,
   isVar, matchPath,
   -- * Re-export LIO server
-  module LIO.HTTP.Server,
-  module LIO.HTTP.Server.Responses,
-  module LIO.HTTP.Server.Controller
+  module Frankie.Server,
+  module Frankie.Responses,
+  module Frankie.Controller
 ) where
 import Prelude hiding (head)
-import LIO.HTTP.Server
-import LIO.HTTP.Server.Responses
-import LIO.HTTP.Server.Controller
+import Frankie.Server
+import Frankie.Responses
+import Frankie.Controller
 
 import Control.Exception
 import Control.Monad.State hiding (get, put)

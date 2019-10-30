@@ -33,7 +33,7 @@ SOFTWARE.
 -}
 
 -- | This module defines some convenience functions for creating responses.
-module LIO.HTTP.Server.Responses
+module Frankie.Responses
   ( ok, okHtml, okJson, okXml
   , movedTo, redirectTo
   , badRequest, requireBasicAuth, forbidden
@@ -44,7 +44,7 @@ module LIO.HTTP.Server.Responses
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy.Char8 as L8
 
-import LIO.HTTP.Server
+import Frankie.Server
 
 
 -- | Type alias for 'S8.ByteString'

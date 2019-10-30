@@ -5,7 +5,7 @@
    files without checking labels.
 -}
 
-module LIO.HTTP.Server.Frankie.Loggers (
+module Frankie.Loggers (
   -- -- * Simple, default loggers
   -- stdOutLogger, stdErrLogger,
   -- -- * Standard out and error loggers
@@ -17,7 +17,7 @@ module LIO.HTTP.Server.Frankie.Loggers (
 
 -- import LIO.TCB (ioTCB)
 -- import LIO.DCLabel
-import LIO.HTTP.Server.Frankie
+import Frankie
 import Data.Time.LocalTime (getZonedTime)
 import System.IO
 import Control.Monad.Trans.Class (lift)

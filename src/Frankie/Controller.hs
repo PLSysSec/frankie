@@ -21,7 +21,7 @@
         else 'respond' $ 'okHtml' "w00t!"
   @
 -}
-module LIO.HTTP.Server.Controller (
+module Frankie.Controller (
   MonadController(..),
   -- * Request relate accessors
   requestHeader,
@@ -42,8 +42,8 @@ module LIO.HTTP.Server.Controller (
 
 import Prelude hiding (log)
 import Control.Exception (SomeException)
-import LIO.HTTP.Server
-import LIO.HTTP.Server.Responses
+import Frankie.Server
+import Frankie.Responses
 
 import Control.Applicative ()
 import Control.Monad

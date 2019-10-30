@@ -28,7 +28,7 @@ whole request object may be too coarse grained.
 Similarly, the 'Response' data type is deliberately simple. This may be
 extended to make it easy to securely stream data in the future.
 -}
-module LIO.HTTP.Server (
+module Frankie.Server (
   -- * Handle requests in the WebMonad
   WebMonad(..), Response(..),
   Application, Middleware,
