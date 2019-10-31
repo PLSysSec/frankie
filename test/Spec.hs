@@ -6,7 +6,7 @@ import Test.HUnit
 
 import Control.Exception
 import Control.Monad
-import LIO.HTTP.Server.Frankie
+import Frankie
 import qualified Data.Map as Map
 
 import Data.Text (Text)
@@ -245,11 +245,11 @@ test_matchPath6 = do
 test_matchPath7 = do
   matchPath [] ["a"] @?= False
 
-nullCtrl0 :: DCController ()
+nullCtrl0 :: Controller () IO ()
 nullCtrl0 = return ()
 
-nullCtrl1 :: Int -> DCController ()
+nullCtrl1 :: Int -> Controller () IO ()
 nullCtrl1 _ = return ()
 
-nullCtrl2 :: Int -> String -> DCController ()
+nullCtrl2 :: Int -> String -> Controller () IO ()
 nullCtrl2 _ _ = return ()
