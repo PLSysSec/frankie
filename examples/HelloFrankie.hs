@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 import Prelude hiding (log)
-import LIO.HTTP.Server.Frankie
-import LIO.HTTP.Server.Frankie.Loggers
+import Frankie
+import Frankie.Loggers
 
 main :: IO ()
 main = runFrankieServer "prod" $ do
@@ -9,7 +9,7 @@ main = runFrankieServer "prod" $ do
     host "*"
     port 3030
     appState ()
-    logger DEBUG colorStdErrLogger
+    logger DEBUG stdErrLogger
     openFileLogger "/tmp/frankie.log.0" >>= logger INFO
       
   mode "dev" $ do
@@ -32,10 +32,10 @@ main = runFrankieServer "prod" $ do
     log ERROR $ "Controller failed with " ++ displayException err
     respond $ serverError "bad bad nab"
 
-top :: DCController s
+top :: Controller s IO ()
 top = respond $ okHtml "Woot"
 
-showUser :: Int -> DCController ()
+showUser :: Int -> Controller () IO ()
 showUser uid = do
   log INFO $ "uid = " ++ show uid
   respond $ okHtml "showUser done!"
@@ -51,13 +51,13 @@ instance Parseable PostId where
                   Just i | i > 0 -> Just (PostId i)
                   _ -> Nothing
 
-showUserPost :: Int -> PostId -> DCController ()
+showUserPost :: Int -> PostId -> Controller () IO ()
 showUserPost uid pid = do
   log INFO $ "uid = " ++ show uid
   log INFO $ "pid = " ++ show pid
   respond $ okHtml "showUserPost done!"
 
-doFail :: DCController ()
+doFail :: Controller () IO ()
 doFail = do
-  log DEBUG $ "about to throw an exception"
+  log DEBUG "about to throw an exception"
   fail "w00t"
