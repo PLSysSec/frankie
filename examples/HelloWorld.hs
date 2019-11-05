@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+
+import Control.Monad.Trans.Class
 import Frankie.Server
 import Frankie.Responses
 import Frankie.Controller
-import Control.Monad.Trans.Class
+import Frankie.IO ()
 
 main :: IO ()
 main = run 1

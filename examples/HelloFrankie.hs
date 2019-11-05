@@ -2,6 +2,7 @@
 import Prelude hiding (log)
 import Frankie
 import Frankie.Loggers
+import Frankie.IO ()
 
 main :: IO ()
 main = runFrankieServer "prod" $ do

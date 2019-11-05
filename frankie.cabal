@@ -17,6 +17,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Frankie,
+                       Frankie.IO,
                        Frankie.Server,
                        Frankie.Responses,
                        Frankie.Controller,
@@ -75,4 +76,4 @@ executable example-hello-frankie
 
 source-repository head
   type:     git
-  location: https://github.com/rosekunkel/frankie
+  location: https://github.com/PLSysSec/frankie.git
