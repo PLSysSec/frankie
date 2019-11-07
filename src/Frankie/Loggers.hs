@@ -1,5 +1,5 @@
 {-# LANGUAGE Unsafe #-}
-
+{-# LANGUAGE Rank2Types #-}
 {- | This module exports a set of loggers in the IO monad. We mark this
    module as @Unsafe@ since it allows for writing to the console and
    files without checking labels.
@@ -9,14 +9,15 @@ module Frankie.Loggers (
   -- * TTY loggers
   TTYLogger(..),
   -- * File loggers
-  FileLogger(..)
+  FileLogger(..),
+  logAtLevel, andLog, liftLogger
 ) where
 
 import Frankie
 import Data.Time.LocalTime (getZonedTime)
 import System.IO
-import Control.Monad.Trans.Class (lift)
 import System.Console.ANSI
+import Control.Monad (when)
 
 class TTYLogger m where
   -- | Logger that prints to standard out, using color for TTYs.
@@ -68,10 +69,19 @@ class FileLogger m where
   -- is no clean way to clean up the file descriptor once the file is open.
   -- In general is is okay because we expect the logger to remain live for
   -- the lifetime of the application.
-  openFileLogger :: FrankieConfigMonad k => FilePath -> k s m (Logger m)
+  openFileLogger :: FilePath -> IO (Logger m)
 
 instance FileLogger IO where
-  openFileLogger path = liftFrankie $ FrankieConfig $ lift $ do
+  openFileLogger path = do
     handle <- openFile path AppendMode
     hSetBuffering handle LineBuffering
     return $ Logger $ hLog False handle
+
+logAtLevel :: Monad m => LogLevel -> Logger m -> Logger m
+logAtLevel level (Logger logger) = Logger $ \ll str -> when (ll < level) $ logger ll str
+
+andLog :: Monad m => Logger m -> Logger m -> Logger m
+andLog (Logger l1) (Logger l2) = Logger $ \ll str -> l1 ll str >> l2 ll str
+
+liftLogger :: (Monad m, Monad n) => (forall a. m a -> n a) -> Logger m -> Logger n
+liftLogger liftFun (Logger logger) = Logger $ \ll str -> liftFun $ logger ll str

@@ -1,22 +1,28 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 import Prelude hiding (log)
 import Frankie
 import Frankie.Loggers
 import Frankie.IO ()
 
 main :: IO ()
-main = runFrankieServer "prod" $ do
+main = do
+  fileLogger <- openFileLogger "/tmp/frankie.log.0"
+  runFrankieServer "prod" $ do
   mode "prod" $ do
     host "*"
     port 3030
-    appState ()
-    logger DEBUG stdErrLogger
-    openFileLogger "/tmp/frankie.log.0" >>= logger INFO
+    appConfig Config { configLogger = logAtLevel DEBUG stdErrLogger `andLog`
+                                      logAtLevel INFO fileLogger }
       
   mode "dev" $ do
     host "127.0.0.1"
     port 3000
-    appState ()
+    appConfig Config { configLogger = stdErrLogger }
   --
   dispatch $ do
     get "/" top
@@ -33,10 +39,15 @@ main = runFrankieServer "prod" $ do
     log ERROR $ "Controller failed with " ++ displayException err
     respond $ serverError "bad bad nab"
 
+data Config = Config { configLogger :: Logger IO }
+
+instance MonadController Config IO m => HasLogger m Config where
+  getLogger config = liftLogger liftWeb $ configLogger config
+
 top :: Controller s IO ()
 top = respond $ okHtml "Woot"
 
-showUser :: Int -> Controller () IO ()
+showUser :: Int -> Controller Config IO ()
 showUser uid = do
   log INFO $ "uid = " ++ show uid
   respond $ okHtml "showUser done!"
@@ -52,13 +63,13 @@ instance Parseable PostId where
                   Just i | i > 0 -> Just (PostId i)
                   _ -> Nothing
 
-showUserPost :: Int -> PostId -> Controller () IO ()
+showUserPost :: Int -> PostId -> Controller Config IO ()
 showUserPost uid pid = do
   log INFO $ "uid = " ++ show uid
   log INFO $ "pid = " ++ show pid
   respond $ okHtml "showUserPost done!"
 
-doFail :: Controller () IO ()
+doFail :: Controller Config IO ()
 doFail = do
   log DEBUG "about to throw an exception"
   fail "w00t"

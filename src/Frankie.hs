@@ -17,7 +17,7 @@ module Frankie (
   FrankieConfig(..), FrankieConfigDispatch(..),
   runFrankieServer,
   -- ** Configuration modes
-  mode, port, host, appState, logger,
+  mode, port, host, appConfig,
   -- ** Dispatch-table
   dispatch,
   get, post, put, patch, delete,
@@ -251,14 +251,14 @@ instance Ord PathSegment where
 --
 
 -- | Set the app port.
-port :: Port -> FrankieConfigMode s m ()
+port :: Port -> FrankieConfigMode config m ()
 port p = do
   cfg <- getModeConfig
   when (isJust $ cfgPort cfg) $ cfgFail "port already set"
   setModeConfig $ cfg {cfgPort = Just p }
 
 -- | Set the app host preference.
-host :: HostPreference -> FrankieConfigMode s m ()
+host :: HostPreference -> FrankieConfigMode config m ()
 host pref = do
   cfg <- getModeConfig
   -- XXX can we use liquid types instead?
@@ -266,24 +266,12 @@ host pref = do
   setModeConfig $ cfg { cfgHostPref = Just pref }
 
 -- | Set the app host preference.
-appState :: s -> FrankieConfigMode s m ()
-appState s = do
+appConfig :: config -> FrankieConfigMode config m ()
+appConfig appCfg = do
   cfg <- getModeConfig
   -- XXX can we use liquid types instead?
-  when (isJust $ cfgAppState cfg) $ cfgFail "state already set"
-  setModeConfig $ cfg { cfgAppState = Just s }
-
--- | Register a logger with the app.
-logger :: Monad m => LogLevel -> Logger m -> FrankieConfigMode s m ()
-logger level (Logger lgr0) = do
-  cfg <- getModeConfig
-  -- create logger that only logs things as sever as level
-  let lgr1 l s = when (l <= level) $ lgr0 l s 
-      newLogger = case cfgLogger cfg of
-                    Just (Logger lgrC) -> \l s -> lgrC l s >> lgr1 l s
-                    Nothing -> lgr1
-  setModeConfig $ cfg { cfgLogger = Just (Logger newLogger)}
-
+  when (isJust $ cfgAppConfig cfg) $ cfgFail "config already set"
+  setModeConfig $ cfg { cfgAppConfig = Just appCfg }
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
@@ -376,7 +364,7 @@ runFrankieConfig (FrankieConfig act) = do
 -- | Run the Frankie server
 runFrankieServer :: WebMonad m
                  => Mode
-                 -> FrankieConfig s m ()
+                 -> FrankieConfig config m ()
                  -> IO ()
 runFrankieServer mode0 frankieAct = do
   cfg <- runFrankieConfig frankieAct
@@ -385,19 +373,15 @@ runFrankieServer mode0 frankieAct = do
     Just modeCfg -> do
       when (isNothing $ cfgPort modeCfg) $ throwIO $ InvalidConfig "missing port"
       when (isNothing $ cfgHostPref modeCfg) $ throwIO $ InvalidConfig "missing host"
-      when (isNothing $ cfgAppState modeCfg) $ throwIO $ InvalidConfig "missing state"
+      when (isNothing $ cfgAppConfig modeCfg) $ throwIO $ InvalidConfig "missing app config"
       let cPort  = fromJust . cfgPort $ modeCfg
           cHost  = fromJust . cfgHostPref $ modeCfg
-          cState = fromJust . cfgAppState $ modeCfg
-          -- if not logger define, just provide a nop
-          lgr = case cfgLogger modeCfg of
-                  Just l -> l
-                  _      -> Logger $ \_ _ -> return ()
+          cCfg = fromJust . cfgAppConfig $ modeCfg
 
-      server cPort cHost (toApp (mainFrankieController cfg) cState lgr)
+      server cPort cHost (toApp (mainFrankieController cfg) cCfg)
 
 -- | The main controller that dispatches requests to corresponding controllers.
-mainFrankieController :: WebMonad m => ServerConfig s m -> Controller s m ()
+mainFrankieController :: WebMonad m => ServerConfig config m -> Controller config m ()
 mainFrankieController cfg = do
   req <- request
   let method   = reqMethod req
@@ -484,11 +468,10 @@ nullServerCfg = ServerConfig {
 type Mode = String
 
 -- | Mode configuration. For example, production or development.
-data ModeConfig s m = ModeConfig {
+data ModeConfig config m = ModeConfig {
   cfgPort        :: Maybe Port,
   cfgHostPref    :: Maybe HostPreference,
-  cfgAppState    :: Maybe s,
-  cfgLogger      :: Maybe (Logger m)
+  cfgAppConfig   :: Maybe config
   }
 
 instance Show (ModeConfig s m) where
@@ -501,6 +484,5 @@ nullModeCfg :: ModeConfig s m
 nullModeCfg =  ModeConfig {
   cfgPort        = Nothing,
   cfgHostPref    = Nothing,
-  cfgAppState    = Nothing,
-  cfgLogger      = Nothing
+  cfgAppConfig  = Nothing
 }

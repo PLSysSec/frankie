@@ -31,6 +31,7 @@ module Frankie.Controller (
   redirectBackOr,
   -- * App-specific logging
   Logger(..), LogLevel(..),
+  MonadLog(..), HasLogger(..),
   -- * Internal controller monad
   fromApp, toApp,
   Controller(..),
@@ -79,48 +80,53 @@ instance Functor ControllerStatus where
 --
 -- Within the Controller monad, the remainder of the computation can be
 -- short-circuited by 'respond'ing with a 'Response'.
-data Controller s m a = Controller {
- runController :: s -> Logger m -> Request m -> m (ControllerStatus a, s)
+data Controller config m a = Controller {
+ runController :: config -> Request m -> m (ControllerStatus a)
 } deriving (Typeable)
 
-instance Functor m => Functor (Controller s m) where
-  fmap f (Controller act) = Controller $ \s0 logger req ->
-    go `fmap` act s0 logger req
-    where go (cs, st) = (f `fmap` cs, st)
+instance Functor m => Functor (Controller config m) where
+  fmap f (Controller act) = Controller $ \cfg req ->
+    go `fmap` act cfg req
+    where go cs = f `fmap` cs
 
-instance (Monad m, Functor m) => Applicative (Controller s m) where
+instance (Monad m, Functor m) => Applicative (Controller config m) where
   pure = return
   (<*>) = ap
 
+class MonadLog m where
+  log :: LogLevel -> String -> m ()
+
+class HasLogger m a where
+  getLogger :: a -> Logger m
+
+instance (MonadController config w m, HasLogger m config) => MonadLog m where
+  log ll str = do
+    (Logger logf) <- getLogger <$> getConfig
+    logf ll str
+
 instance Monad m => Monad (Controller s m) where
-  return a = Controller $ \st _ _ -> return $ (Working a, st)
-  (Controller act0) >>= fn = Controller $ \st0 logger req -> do
-    (cs, st1) <- act0 st0 logger req
+  return a = Controller $ \_ _ -> return $ Working a
+  (Controller act0) >>= fn = Controller $ \cfg req -> do
+    cs <- act0 cfg req
     case cs of
-      Done resp -> return (Done resp, st1)
+      Done resp -> return $ Done resp
       Working v -> do
         let (Controller act1) = fn v
-        act1 st1 logger req
+        act1 cfg req
 
 instance MonadTrans (Controller s) where
-  lift act = Controller $ \st _ _ -> act >>= \r -> return (Working r, st)
+  lift act = Controller $ \_ _ -> act >>= \r -> return $ Working r
 
-class (Monad m, WebMonad w) => MonadController s w m | m -> s w where
+class (Monad m, WebMonad w) => MonadController config w m | m -> config w where
+  getConfig :: m config
   request :: m (Request w)
   respond :: Response -> m a
-  getAppState :: m s
-  putAppState :: s -> m ()
-  log :: LogLevel -> String -> m ()
   liftWeb :: w a -> m a
 
-instance WebMonad n => MonadController s n (Controller s n) where
-  request = Controller $ \st _ req -> return (Working req, st)
-  respond resp = Controller $ \st _ _ -> return (Done resp, st)
-  getAppState = Controller $ \st _ _ -> return (Working st, st)
-  putAppState st = Controller $ \_ _ _ -> return (Working (), st)
-  log level str = Controller $ \s0 (Logger logger) _ -> do
-    logger level str
-    return (Working (), s0)
+instance WebMonad w => MonadController config w (Controller config w) where
+  getConfig = Controller $ \cfg _ -> return $ Working cfg
+  request = Controller $ \_ req -> return $ Working req
+  respond resp = Controller $ \_ _ -> return $ Done resp
   liftWeb = lift
 
 -- | Try executing the controller action, returning the result or raised
@@ -128,40 +134,14 @@ instance WebMonad n => MonadController s n (Controller s n) where
 tryController :: WebMonad m
               => Controller s m a
               -> Controller s m (Either SomeException a)
-tryController ctrl = Controller $ \s0 logger req -> do
-  eres <- tryWeb $ runController ctrl s0 logger req
+tryController ctrl = Controller $ \cfg req -> do
+  eres <- tryWeb $ runController ctrl cfg req
   case eres of
-   Left err -> return (Working (Left err), s0)
-   Right (stat, s1) ->
+   Left err -> return $ Working (Left err)
+   Right stat ->
     case stat of
-      Working a -> return (Working (Right a), s1)
-      Done r    -> return (Done r, s1)
-
--- -- | DC-labeled controller
--- type DCController s = Controller s DC ()
-
---
--- requests/responses
---
-
--- -- | Extract the current request.
--- request :: Monad m => Controller s m (Request m)
--- request = ask
-
--- -- | Produce a response. Note that the first such response in a monadic
--- -- action wins and the remainder of the controller will not execute.
--- --
--- -- @respond r >>= f === respond r@
--- respond :: Monad m => Response -> Controller s m a
--- respond resp = Controller $ \s _ _ -> return (Done resp, s)
-
--- -- | Extract the application-specific state.
--- getAppState :: Monad m => Controller s m s
--- getAppState = get
-
--- -- | Set the application-specific state.
--- putAppState :: Monad m => s -> Controller s m ()
--- putAppState = put
+      Working a -> return $ Working (Right a)
+      Done r    -> return $ Done r
 
 -- | Convert an application to a controller. Internally, this uses
 -- 'respond' to produce the response.
@@ -173,12 +153,12 @@ fromApp app = do
 
 -- | Convert the controller into an 'Application'. This can be used to
 -- directly run the controller with 'server', for example.
-toApp :: WebMonad m => Controller s m () -> s -> Logger m -> Application m
-toApp ctrl s0 logger req = do
-  (cs, _) <- runController ctrl s0 logger req
+toApp :: WebMonad m => Controller config m () -> config -> Application m
+toApp ctrl cfg req = do
+  cs <- runController ctrl cfg req
   return $ case cs of
             Done resp -> resp
-            _         -> notFound
+            _         -> serverError "Unhandled case"
 
 --
 -- query parameters
@@ -192,7 +172,7 @@ toApp ctrl s0 logger req = do
 -- would return @["bar"]@, but
 -- @queryParam \"zap\"@
 -- would return @[]@.
-queryParams :: (MonadController s w m, Parseable a)
+queryParams :: (MonadController config w m, Parseable a)
             => Strict.ByteString -- ^ Parameter name
             -> m [a]
 queryParams varName = do
@@ -233,8 +213,8 @@ instance {-# OVERLAPPABLE #-} (Read a, Typeable a) => Parseable a where
 -- | Returns the value of the given request header or 'Nothing' if it is not
 -- present in the HTTP request.
 requestHeader :: WebMonad m
-              => HeaderName -> Controller s m (Maybe Strict.ByteString)
-requestHeader name = request >>= return . lookup name . reqHeaders
+              => HeaderName -> Controller config m (Maybe Strict.ByteString)
+requestHeader name = lookup name . reqHeaders <$> request
 
 -- | Redirect back to the referer. If the referer header is not present
 -- 'redirectTo' root (i.e., @\/@).

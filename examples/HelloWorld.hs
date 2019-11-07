@@ -21,7 +21,7 @@ ioPutStrLn :: String -> Controller config IO ()
 ioPutStrLn str = lift $ putStrLn str
 
 ioApp :: Controller () IO () -> Application IO
-ioApp app = toApp app () $ Logger $ \_ _ -> return ()
+ioApp app = toApp app ()
 
 app5 :: Application IO
 app5 = ioApp $ do
