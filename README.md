@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/PLSysSec/frankie.svg?branch=master)](https://travis-ci.com/PLSysSec/frankie)
+
 Frankie is a simple Web server and routing framework. The server lets your run
 your app in your custom monad, not just IO. The framework is
 configuration-driven and ensure that controllers are well-typed (vs. frameworks
