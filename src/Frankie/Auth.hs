@@ -28,18 +28,14 @@ data AuthMethod user m = AuthMethod {
   authMethodRequire :: m user
   }
 
-class HasAuthMethod user m a | a -> user where
+class HasAuthMethod user m a | a -> m user where
   getAuthMethod :: a -> AuthMethod user m
-
-instance (MonadTrans t, Monad m, HasAuthMethod user m a) => HasAuthMethod user (t m) a where
-  getAuthMethod x = let AuthMethod try req = getAuthMethod x in
-      AuthMethod (lift try) (lift req)
 
 class Monad m => MonadAuth user m | m -> user where
   tryAuth :: m (Maybe user)
   requireAuth :: m user
 
-instance (Monad m, HasAuthMethod user m config) => MonadAuth user (ConfigT config m) where
+instance (Monad m, HasAuthMethod user m config, MonadConfig config m) => MonadAuth user m where
   tryAuth = getAuthMethod <$> getConfig >>= authMethodTry
   requireAuth = getAuthMethod <$> getConfig >>= authMethodRequire
 
