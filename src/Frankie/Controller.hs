@@ -100,7 +100,7 @@ instance Monad m => Monad (ControllerT m) where
         let (ControllerT act1) = fn v
         act1 req
 
-instance MonadTrans (ControllerT) where
+instance MonadTrans ControllerT where
   lift act = ControllerT $ \_ -> act >>= \r -> return $ Working r
 
 class (Monad m, WebMonad w) => MonadController w m | m -> w where
@@ -196,20 +196,20 @@ instance {-# OVERLAPPABLE #-} (Read a, Typeable a) => Parseable a where
 
 -- | Returns the value of the given request header or 'Nothing' if it is not
 -- present in the HTTP request.
-requestHeader :: WebMonad m
-              => HeaderName -> ControllerT m (Maybe Strict.ByteString)
+requestHeader :: MonadController w m
+              => HeaderName -> m (Maybe Strict.ByteString)
 requestHeader name = lookup name . reqHeaders <$> request
 
 -- | Redirect back to the referer. If the referer header is not present
 -- 'redirectTo' root (i.e., @\/@).
-redirectBack :: WebMonad m => ControllerT m ()
+redirectBack :: MonadController w m => m ()
 redirectBack = redirectBackOr (redirectTo "/")
 
 -- | Redirect back to the referer. If the referer header is not present
 -- fallback on the given 'Response'.
-redirectBackOr :: WebMonad m
+redirectBackOr :: MonadController w m
                => Response -- ^ Fallback response
-               -> ControllerT m ()
+               -> m ()
 redirectBackOr def = do
   mrefr <- requestHeader "referer"
   case mrefr of
