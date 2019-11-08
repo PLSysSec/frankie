@@ -1,12 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE UndecidableInstances #-}
 import Prelude hiding (log)
 import Frankie
-import Frankie.Loggers
+import Frankie.Config
+import Frankie.Log
 import Frankie.IO ()
 
 main :: IO ()
@@ -16,13 +13,17 @@ main = do
   mode "prod" $ do
     host "*"
     port 3030
-    appConfig Config { configLogger = logAtLevel DEBUG stdErrLogger `andLog`
-                                      logAtLevel INFO fileLogger }
+    initWith $ configure Config {
+      configLogger = logAtLevel DEBUG stdErrLogger `andLog`
+                     logAtLevel INFO fileLogger
+      }
       
   mode "dev" $ do
     host "127.0.0.1"
     port 3000
-    appConfig Config { configLogger = stdErrLogger }
+    initWith $ configure Config {
+      configLogger = stdErrLogger
+      }
   --
   dispatch $ do
     get "/" top
@@ -33,21 +34,25 @@ main = do
     fallback $ do
       req <- request
       log WARNING $ "Not sure how to handle: " ++ show req
-      respond $ notFound
+      respond notFound
   --
   onError $ \err -> do
     log ERROR $ "Controller failed with " ++ displayException err
     respond $ serverError "bad bad nab"
 
-data Config = Config { configLogger :: Logger IO }
+type Controller = ConfigT Config (ControllerT IO) ()
 
-instance MonadController Config IO m => HasLogger m Config where
-  getLogger config = liftLogger liftWeb $ configLogger config
+data Config = Config {
+  configLogger :: Logger IO
+}
 
-top :: Controller s IO ()
+instance HasLogger IO Config where
+  getLogger = configLogger
+
+top :: Controller
 top = respond $ okHtml "Woot"
 
-showUser :: Int -> Controller Config IO ()
+showUser :: Int -> Controller
 showUser uid = do
   log INFO $ "uid = " ++ show uid
   respond $ okHtml "showUser done!"
@@ -63,13 +68,13 @@ instance Parseable PostId where
                   Just i | i > 0 -> Just (PostId i)
                   _ -> Nothing
 
-showUserPost :: Int -> PostId -> Controller Config IO ()
+showUserPost :: Int -> PostId -> Controller
 showUserPost uid pid = do
   log INFO $ "uid = " ++ show uid
   log INFO $ "pid = " ++ show pid
   respond $ okHtml "showUserPost done!"
 
-doFail :: Controller Config IO ()
+doFail :: Controller
 doFail = do
   log DEBUG "about to throw an exception"
   fail "w00t"

@@ -1,10 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeApplications #-}
@@ -14,10 +12,10 @@
 {-# LANGUAGE PolyKinds #-}
 module Frankie (
   -- * Top-level interface
-  FrankieConfig(..), FrankieConfigDispatch(..),
+  FrankieConfigDispatch(..),
   runFrankieServer,
   -- ** Configuration modes
-  mode, port, host, appConfig,
+  mode, port, host, initWith,
   -- ** Dispatch-table
   dispatch,
   get, post, put, patch, delete,
@@ -58,7 +56,7 @@ import Data.Maybe
 import Data.Map (Map)
 import Data.List (intercalate)
 import Data.Text (Text)
-import Type.Reflection (TypeRep, SomeTypeRep(..), typeRep, pattern Fun)
+import Type.Reflection (SomeTypeRep(..), typeRep)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Map as Map
@@ -67,48 +65,48 @@ import qualified Data.Map as Map
 -- Configure dispatch table
 --
 
-dispatch :: FrankieConfigDispatch s m () -> FrankieConfig s m ()
+dispatch :: FrankieConfigDispatch w m () -> FrankieConfig w m ()
 dispatch (FrankieConfigDispatch act) = act
 
 
 -- | Matches the GET method on the given URL pattern
-get :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+get :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 get path handler = FrankieConfigDispatch $ regMethodHandler methodGet path handler
 
 -- | Matches the POST method on the given URL pattern
-post :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+post :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 post path handler = FrankieConfigDispatch $ regMethodHandler methodPost path handler
 
 -- | Matches the PUT method on the given URL pattern
-put :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+put :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 put path handler = FrankieConfigDispatch $ regMethodHandler methodPut path handler
 
 -- | Matches the PATCH method on the given URL pattern
-patch :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+patch :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 patch path handler = FrankieConfigDispatch $ regMethodHandler methodPatch path handler
 
 -- | Matches the PATCH method on the given URL pattern
-delete :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+delete :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 delete path handler = FrankieConfigDispatch $ regMethodHandler methodDelete path handler
 
 -- | Matches the HEAD method on the given URL pattern
-head :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+head :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 head path handler = FrankieConfigDispatch $ regMethodHandler methodHead path handler
 
 -- | Matches the TRACE method on the given URL pattern
-trace :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+trace :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 trace path handler = FrankieConfigDispatch $ regMethodHandler methodTrace path handler
 
 -- | Matches the CONNECT method on the given URL pattern
-connect :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+connect :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 connect path handler = FrankieConfigDispatch $ regMethodHandler methodConnect path handler
 
 -- | Matches the OPTIONS method on the given URL pattern
-options :: RequestHandler h s m => Text -> h -> FrankieConfigDispatch s m ()
+options :: RequestHandler w m h => Text -> h -> FrankieConfigDispatch w m ()
 options path handler = FrankieConfigDispatch $ regMethodHandler methodOptions path handler
 
 -- | Fallback controller called if nothing else matched
-fallback :: Monad m => Controller s m () -> FrankieConfigDispatch s m ()
+fallback :: m () -> FrankieConfigDispatch w m ()
 fallback controller = FrankieConfigDispatch $ do
   cfg <- State.get
   -- XXX liquid types
@@ -122,16 +120,16 @@ fallback controller = FrankieConfigDispatch $ do
 --
 
 -- | On parse failure, respond with 400, bad request.
-parseFailed :: MonadController s w m => m a
+parseFailed :: MonadController w m => m a
 parseFailed = respond badRequest
 
 -- | This action produces a server error response. This response indicates a
 -- bug in this server implementation.
-invalidArgs :: MonadController s w m => m ()
+invalidArgs :: MonadController w m => m ()
 invalidArgs = respond $ serverError "BUG: controller called with invalid args"
 
 -- | Get the path variable or fail with parser error
-pathVarOrFail :: (MonadController s w m, Parseable a)
+pathVarOrFail :: (MonadController w m, Parseable a)
               => PathSegment -- ^ Parameter name
               -> m a
 pathVarOrFail ps = do
@@ -144,36 +142,33 @@ pathVarOrFail ps = do
     _ -> parseFailed
 
 
-class (Monad m, Typeable h) => RequestHandler h s m | h -> s m where
+class MonadController w m => RequestHandler w m h | h -> w m where
   -- | Apply the request handler, parsing the supplied list of
   -- variables. The returned controller will respond with a
   -- 'parseFailed' error if parsing fails.
-  handlerToController :: [PathSegment] -> h -> Controller s m ()
+  handlerToController :: [PathSegment] -> h -> m ()
 
   -- | The types for the arugments the handler takes
-  reqHandlerArgTy :: FrankieConfig s m [SomeTypeRep]
-  reqHandlerArgTy = return . getArgs' $ typeRep @h
-    where getArgs' :: TypeRep a -> [SomeTypeRep]
-          getArgs' (Fun arg rest) = SomeTypeRep arg : getArgs' rest
-          getArgs' _      = []
+  reqHandlerArgTy :: [SomeTypeRep]
 
-instance (Typeable s, WebMonad m, Typeable m)
-  => RequestHandler (Controller s m ()) s m where
+instance MonadController w m => RequestHandler w m (m ()) where
   handlerToController [] ctrl = ctrl
   handlerToController _ _ = invalidArgs
 
-instance (Parseable a, Typeable a, RequestHandler c s m, WebMonad m)
-  => RequestHandler (a -> c) s m where
+  reqHandlerArgTy = []
+
+instance (Parseable a, Typeable a, RequestHandler w m h)
+  => RequestHandler w m (a -> h) where
   handlerToController (ta:ts) ctrl = do
     a <- pathVarOrFail ta
     handlerToController ts (ctrl a)
   handlerToController _ _ = invalidArgs
 
-
+  reqHandlerArgTy = SomeTypeRep (typeRep @a) : reqHandlerArgTy @w @m @h
 
 -- | Register a handler for the particular method and path.
-regMethodHandler :: forall h s m. RequestHandler h s m
-                 => Method -> Text -> h -> FrankieConfig s m ()
+regMethodHandler :: forall w m h. (RequestHandler w m h, MonadController w m)
+                 => Method -> Text -> h -> FrankieConfig w m ()
 regMethodHandler method path handler = do
   cfg <- State.get
   segments <- toPathSegments path
@@ -183,8 +178,8 @@ regMethodHandler method path handler = do
   when (isJust $ Map.lookup key0 map0) $
     cfgFail $ "Already have handler for: " ++ show (method, segments)
   -- Make sure that the controller and number of vars match (liquid?)
-  args <- reqHandlerArgTy @h
-  let vars   = filter isVar segments
+  let args   = reqHandlerArgTy @w @m @h
+      vars   = filter isVar segments
       nrVars = length vars
       nrArgs = length args
   when (nrVars /= nrArgs) $
@@ -251,31 +246,30 @@ instance Ord PathSegment where
 --
 
 -- | Set the app port.
-port :: Port -> FrankieConfigMode config m ()
+port :: Port -> FrankieConfigMode w m ()
 port p = do
   cfg <- getModeConfig
   when (isJust $ cfgPort cfg) $ cfgFail "port already set"
   setModeConfig $ cfg {cfgPort = Just p }
 
 -- | Set the app host preference.
-host :: HostPreference -> FrankieConfigMode config m ()
+host :: HostPreference -> FrankieConfigMode w m ()
 host pref = do
   cfg <- getModeConfig
   -- XXX can we use liquid types instead?
   when (isJust $ cfgHostPref cfg) $ cfgFail "host already set"
   setModeConfig $ cfg { cfgHostPref = Just pref }
 
--- | Set the app host preference.
-appConfig :: config -> FrankieConfigMode config m ()
-appConfig appCfg = do
+initWith :: (m () -> ControllerT w ()) -> FrankieConfigMode w m ()
+initWith initializeFun = do
   cfg <- getModeConfig
   -- XXX can we use liquid types instead?
-  when (isJust $ cfgAppConfig cfg) $ cfgFail "config already set"
-  setModeConfig $ cfg { cfgAppConfig = Just appCfg }
+  when (isJust $ cfgToController cfg) $ cfgFail "initializer already set"
+  setModeConfig $ cfg { cfgToController = Just initializeFun }
 
 -- | Helper function for getting the mode configuration corresponding to the
 -- current mode
-getModeConfig :: FrankieConfigMode s m (ModeConfig s m)
+getModeConfig :: FrankieConfigMode w m (ModeConfig w m)
 getModeConfig = do
   mode0 <- ask
   cfg <- State.get
@@ -287,7 +281,7 @@ getModeConfig = do
 
 -- | Helper function for updating the mode configuration corresponding to the
 -- current mode
-setModeConfig :: ModeConfig s m -> FrankieConfigMode s m ()
+setModeConfig :: ModeConfig w m -> FrankieConfigMode w m ()
 setModeConfig modeCfg = do
   mode0 <- ask
   cfg <- State.get
@@ -295,7 +289,7 @@ setModeConfig modeCfg = do
   State.put $ cfg { cfgModes = Map.insert mode0 modeCfg modeMap }
 
 -- | Helper function for creating a new config mode.
-newModeConfig :: FrankieConfigMode s m ()
+newModeConfig :: FrankieConfigMode w m ()
 newModeConfig = do
   mode0 <- ask
   cfg <- State.get
@@ -311,19 +305,19 @@ newModeConfig = do
 --
 
 -- | Type used to encode a Frankie server configuration
-newtype FrankieConfig s m a = FrankieConfig {
-  unFrankieConfig :: StateT (ServerConfig s m) IO a
-} deriving (Functor, Applicative, Monad, MonadState (ServerConfig s m))
+newtype FrankieConfig w m a = FrankieConfig {
+  unFrankieConfig :: StateT (ServerConfig w m) IO a
+} deriving (Functor, Applicative, Monad, MonadState (ServerConfig w m))
 
 class FrankieConfigMonad k where
-  liftFrankie :: forall s m a. FrankieConfig s m a -> k s m a
+  liftFrankie :: forall w m a. FrankieConfig w m a -> k w m a
 
 instance FrankieConfigMonad FrankieConfig where
   liftFrankie = id
 
 -- | Simple wrapper around 'FrankieConfig' to separate the dispatch-table
 -- portions of the configuration from the rest.
-newtype FrankieConfigDispatch s m a = FrankieConfigDispatch (FrankieConfig s m a)
+newtype FrankieConfigDispatch w m a = FrankieConfigDispatch (FrankieConfig w m a)
   deriving (Functor, Applicative, Monad )
 
 instance FrankieConfigMonad FrankieConfigDispatch where
@@ -331,14 +325,14 @@ instance FrankieConfigMonad FrankieConfigDispatch where
 
 -- | Simple wrapper around 'FrankieConfig' to separate the different mode
 -- portions of the configuration from the rest of the configurations.
-newtype FrankieConfigMode s m a = FrankieConfigMode (ReaderT Mode (FrankieConfig s m) a)
-  deriving (Functor, Applicative, Monad, MonadReader Mode, MonadState (ServerConfig s m))
+newtype FrankieConfigMode w m a = FrankieConfigMode (ReaderT Mode (FrankieConfig w m) a)
+  deriving (Functor, Applicative, Monad, MonadReader Mode, MonadState (ServerConfig w m))
 
 instance FrankieConfigMonad FrankieConfigMode where
   liftFrankie act = FrankieConfigMode $ lift act
 
 -- | Configure a particular mode.
-mode :: Mode -> FrankieConfigMode s m a -> FrankieConfig s m a
+mode :: Mode -> FrankieConfigMode w m a -> FrankieConfig w m a
 mode modeName act =
   let (FrankieConfigMode rModeCfg) = newModeConfig >> act
   in runReaderT rModeCfg modeName
@@ -346,7 +340,7 @@ mode modeName act =
 -- | Register a controller to be called when other normal controllers raise
 -- exceptions. If this controller throws an exception, a default error response
 -- is produced.
-onError :: (SomeException -> Controller s m ()) -> FrankieConfig s m ()
+onError :: (SomeException -> m ()) -> FrankieConfig w m ()
 onError handler = do
   cfg <- State.get
   when (isJust $ cfgOnErrorHandler cfg) $
@@ -355,16 +349,16 @@ onError handler = do
 
 
 -- | Run a config action to produce a server configuration
-runFrankieConfig :: FrankieConfig s m () -> IO (ServerConfig s m)
+runFrankieConfig :: FrankieConfig w m () -> IO (ServerConfig w m)
 runFrankieConfig (FrankieConfig act) = do
   (_, cfg) <- runStateT act nullServerCfg
   -- XXX can we use liquid types instead?
   return cfg
 
 -- | Run the Frankie server
-runFrankieServer :: WebMonad m
+runFrankieServer :: (WebMonad w, MonadController w m)
                  => Mode
-                 -> FrankieConfig config m ()
+                 -> FrankieConfig w m ()
                  -> IO ()
 runFrankieServer mode0 frankieAct = do
   cfg <- runFrankieConfig frankieAct
@@ -373,16 +367,15 @@ runFrankieServer mode0 frankieAct = do
     Just modeCfg -> do
       when (isNothing $ cfgPort modeCfg) $ throwIO $ InvalidConfig "missing port"
       when (isNothing $ cfgHostPref modeCfg) $ throwIO $ InvalidConfig "missing host"
-      when (isNothing $ cfgAppConfig modeCfg) $ throwIO $ InvalidConfig "missing app config"
-      let cPort  = fromJust . cfgPort $ modeCfg
-          cHost  = fromJust . cfgHostPref $ modeCfg
-          cCfg = fromJust . cfgAppConfig $ modeCfg
-
-      server cPort cHost (toApp (mainFrankieController cfg) cCfg)
+      when (isNothing $ cfgToController modeCfg) $ throwIO $ InvalidConfig "missing controller executor"
+      let cPort = fromJust . cfgPort $ modeCfg
+          cHost = fromJust . cfgHostPref $ modeCfg
+          cToController = fromJust . cfgToController $ modeCfg
+      server cPort cHost . toApp $ mainFrankieController cToController cfg
 
 -- | The main controller that dispatches requests to corresponding controllers.
-mainFrankieController :: WebMonad m => ServerConfig config m -> Controller config m ()
-mainFrankieController cfg = do
+mainFrankieController :: (WebMonad w, MonadController w m) => (m () -> ControllerT w ()) -> ServerConfig w m -> ControllerT w ()
+mainFrankieController toController cfg = do
   req <- request
   let method   = reqMethod req
       pathInfo = reqPathInfo req
@@ -397,7 +390,7 @@ mainFrankieController cfg = do
     -- nope, just respond with 404
     _ -> respond notFound
   -- execute the controller action
-  er <- tryController controller
+  er <- tryController . toController $ controller
   case er of
     Right r  -> return r
     -- controller raised exception
@@ -406,7 +399,7 @@ mainFrankieController cfg = do
         -- have user-define handler
         Just handler -> do
           -- execute user-defined handler
-          er' <- tryController $ handler err
+          er' <- tryController . toController $ handler err
           case er' of
             -- handler produced response
             Right r -> return r
@@ -428,18 +421,18 @@ matchPath _            _      = False
 -- | A server configuration containts the port and host to run the server on.
 -- It also contains the dispatch table.
 -- TODO: add support for error handlers, loggers, dev vs. prod, etc.
-data ServerConfig s m = ServerConfig {
-  cfgModes       :: Map Mode (ModeConfig s m),
+data ServerConfig w m = ServerConfig {
+  cfgModes       :: Map Mode (ModeConfig w m),
   -- ^ Configuration modes
-  cfgDispatchMap :: Map (Method, [PathSegment]) (Controller s m ()),
+  cfgDispatchMap :: Map (Method, [PathSegment]) (m ()),
   -- ^ Dispatch table
-  cfgDispatchFallback :: Maybe (Controller s m ()),
+  cfgDispatchFallback :: Maybe (m ()),
   -- ^ Dispatch fallback handler
-  cfgOnErrorHandler  :: Maybe (SomeException -> Controller s m ())
+  cfgOnErrorHandler  :: Maybe (SomeException -> m ())
   -- ^ Exception handler
 }
 
-instance Show s  => Show (ServerConfig s m) where
+instance Show (ServerConfig w m) where
   show cfg =
     "ServerConfig {"
     ++ "cfgModes = " ++ (show . cfgModes $ cfg)
@@ -452,11 +445,11 @@ data InvalidConfigException = InvalidConfig String
 instance Exception InvalidConfigException
 
 -- | Throw 'InvalidConfigException' error to indicate bad configuration.
-cfgFail :: FrankieConfigMonad k => String -> k s m a
+cfgFail :: FrankieConfigMonad k => String -> k w m a
 cfgFail msg = liftFrankie . FrankieConfig $ lift . throwIO $ InvalidConfig msg
 
 -- | Initial emtpy server configuration
-nullServerCfg :: ServerConfig s m
+nullServerCfg :: ServerConfig w m
 nullServerCfg = ServerConfig {
   cfgModes            = Map.empty,
   cfgDispatchMap      = Map.empty,
@@ -468,21 +461,21 @@ nullServerCfg = ServerConfig {
 type Mode = String
 
 -- | Mode configuration. For example, production or development.
-data ModeConfig config m = ModeConfig {
-  cfgPort        :: Maybe Port,
-  cfgHostPref    :: Maybe HostPreference,
-  cfgAppConfig   :: Maybe config
+data ModeConfig w m = ModeConfig {
+  cfgPort         :: Maybe Port,
+  cfgHostPref     :: Maybe HostPreference,
+  cfgToController :: Maybe (m () -> ControllerT w ())
   }
 
-instance Show (ModeConfig s m) where
+instance Show (ModeConfig w m) where
   show cfg = (show . cfgHostPref $ cfg) ++ ":" ++
-             (show . cfgHostPref $ cfg)
+             (show . cfgPort $ cfg)
 
 
 -- | Empty mode configuration.
-nullModeCfg :: ModeConfig s m
+nullModeCfg :: ModeConfig w m
 nullModeCfg =  ModeConfig {
   cfgPort        = Nothing,
   cfgHostPref    = Nothing,
-  cfgAppConfig  = Nothing
+  cfgToController = Nothing
 }

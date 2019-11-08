@@ -1,23 +1,45 @@
-{-# LANGUAGE Unsafe #-}
-{-# LANGUAGE Rank2Types #-}
-{- | This module exports a set of loggers in the IO monad. We mark this
-   module as @Unsafe@ since it allows for writing to the console and
-   files without checking labels.
--}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+-- |
 
-module Frankie.Loggers (
-  -- * TTY loggers
-  TTYLogger(..),
-  -- * File loggers
-  FileLogger(..),
-  logAtLevel, andLog, liftLogger
-) where
+module Frankie.Log where
 
-import Frankie
 import Data.Time.LocalTime (getZonedTime)
 import System.IO
 import System.Console.ANSI
 import Control.Monad (when)
+import Control.Monad.Trans
+import Frankie.Config
+
+-- | A logger is simply a function that takes the 'LogLevel' and string to
+-- write, and produces an action which when executed may log the string. What
+-- it means to log is by choice left up to the application.
+newtype Logger m = Logger { runLogger :: LogLevel -> String -> m () }
+
+-- | Severity of logging inforamation following RFC5424.
+data LogLevel = EMERGENCY
+              | ALERT
+              | CRITICAL
+              | ERROR
+              | WARNING
+              | NOTICE
+              | INFO
+              | DEBUG
+              deriving (Show, Eq, Ord)
+
+class MonadLog m where
+  log :: LogLevel -> String -> m ()
+
+class HasLogger m a where
+  getLogger :: a -> Logger m
+
+instance (MonadTrans t, Monad m, HasLogger m a) => HasLogger (t m) a where
+  getLogger x = let Logger logFun = getLogger x in
+      Logger $ \ll str -> lift $ logFun ll str
+
+instance (Monad m, HasLogger m config) => MonadLog (ConfigT config m) where
+  log ll str = getLogger <$> getConfig >>= \logger -> runLogger logger ll str
 
 class TTYLogger m where
   -- | Logger that prints to standard out, using color for TTYs.
@@ -82,6 +104,3 @@ logAtLevel level (Logger logger) = Logger $ \ll str -> when (ll < level) $ logge
 
 andLog :: Monad m => Logger m -> Logger m -> Logger m
 andLog (Logger l1) (Logger l2) = Logger $ \ll str -> l1 ll str >> l2 ll str
-
-liftLogger :: (Monad m, Monad n) => (forall a. m a -> n a) -> Logger m -> Logger n
-liftLogger liftFun (Logger logger) = Logger $ \ll str -> liftFun $ logger ll str

@@ -17,11 +17,11 @@ run nr = server 3000 "127.0.0.1" $ case nr of
           2 -> app2
           _ -> app1
 
-ioPutStrLn :: String -> Controller config IO ()
+ioPutStrLn :: String -> ControllerT IO ()
 ioPutStrLn str = lift $ putStrLn str
 
-ioApp :: Controller () IO () -> Application IO
-ioApp app = toApp app ()
+ioApp :: ControllerT IO () -> Application IO
+ioApp app = toApp app
 
 app5 :: Application IO
 app5 = ioApp $ do
@@ -38,8 +38,8 @@ app4 = ioApp $ do
   ioPutStrLn $ show host
   woo <- requestHeader "woo"
   ioPutStrLn $ show $ woo == Nothing
-  respond $ okJson "{}"
-  ioPutStrLn $ "you wont see this"
+  _ <- respond $ okJson "{}"
+  ioPutStrLn "you wont see this"
 
 
 app3 :: Application IO

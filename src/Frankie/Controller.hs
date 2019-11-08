@@ -29,12 +29,9 @@ module Frankie.Controller (
   -- * Response related accessors
   redirectBack,
   redirectBackOr,
-  -- * App-specific logging
-  Logger(..), LogLevel(..),
-  MonadLog(..), HasLogger(..),
   -- * Internal controller monad
   fromApp, toApp,
-  Controller(..),
+  ControllerT(..),
   ControllerStatus(..),
   tryController,
   -- -- * DC Label specific type alias
@@ -80,62 +77,49 @@ instance Functor ControllerStatus where
 --
 -- Within the Controller monad, the remainder of the computation can be
 -- short-circuited by 'respond'ing with a 'Response'.
-data Controller config m a = Controller {
- runController :: config -> Request m -> m (ControllerStatus a)
+newtype ControllerT m a = ControllerT {
+ runController :: Request m -> m (ControllerStatus a)
 } deriving (Typeable)
 
-instance Functor m => Functor (Controller config m) where
-  fmap f (Controller act) = Controller $ \cfg req ->
-    go `fmap` act cfg req
+instance Functor m => Functor (ControllerT m) where
+  fmap f (ControllerT act) = ControllerT $ \req ->
+    go `fmap` act req
     where go cs = f `fmap` cs
 
-instance (Monad m, Functor m) => Applicative (Controller config m) where
+instance (Monad m, Functor m) => Applicative (ControllerT m) where
   pure = return
   (<*>) = ap
 
-class MonadLog m where
-  log :: LogLevel -> String -> m ()
-
-class HasLogger m a where
-  getLogger :: a -> Logger m
-
-instance (MonadController config w m, HasLogger m config) => MonadLog m where
-  log ll str = do
-    (Logger logf) <- getLogger <$> getConfig
-    logf ll str
-
-instance Monad m => Monad (Controller s m) where
-  return a = Controller $ \_ _ -> return $ Working a
-  (Controller act0) >>= fn = Controller $ \cfg req -> do
-    cs <- act0 cfg req
+instance Monad m => Monad (ControllerT m) where
+  return a = ControllerT $ \_ -> return $ Working a
+  (ControllerT act0) >>= fn = ControllerT $ \req -> do
+    cs <- act0 req
     case cs of
       Done resp -> return $ Done resp
       Working v -> do
-        let (Controller act1) = fn v
-        act1 cfg req
+        let (ControllerT act1) = fn v
+        act1 req
 
-instance MonadTrans (Controller s) where
-  lift act = Controller $ \_ _ -> act >>= \r -> return $ Working r
+instance MonadTrans (ControllerT) where
+  lift act = ControllerT $ \_ -> act >>= \r -> return $ Working r
 
-class (Monad m, WebMonad w) => MonadController config w m | m -> config w where
-  getConfig :: m config
+class (Monad m, WebMonad w) => MonadController w m | m -> w where
   request :: m (Request w)
   respond :: Response -> m a
   liftWeb :: w a -> m a
 
-instance WebMonad w => MonadController config w (Controller config w) where
-  getConfig = Controller $ \cfg _ -> return $ Working cfg
-  request = Controller $ \_ req -> return $ Working req
-  respond resp = Controller $ \_ _ -> return $ Done resp
+instance WebMonad m => MonadController m (ControllerT m) where
+  request = ControllerT $ \req -> return $ Working req
+  respond resp = ControllerT $ \_ -> return $ Done resp
   liftWeb = lift
 
 -- | Try executing the controller action, returning the result or raised
 -- exception. Note that exceptions restore the state.
 tryController :: WebMonad m
-              => Controller s m a
-              -> Controller s m (Either SomeException a)
-tryController ctrl = Controller $ \cfg req -> do
-  eres <- tryWeb $ runController ctrl cfg req
+              => ControllerT m a
+              -> ControllerT m (Either SomeException a)
+tryController ctrl = ControllerT $ \req -> do
+  eres <- tryWeb $ runController ctrl req
   case eres of
    Left err -> return $ Working (Left err)
    Right stat ->
@@ -145,7 +129,7 @@ tryController ctrl = Controller $ \cfg req -> do
 
 -- | Convert an application to a controller. Internally, this uses
 -- 'respond' to produce the response.
-fromApp :: MonadController s w m => Application w -> m ()
+fromApp :: MonadController w m => Application w -> m ()
 fromApp app = do
   req <- request
   resp <- liftWeb $ app req
@@ -153,9 +137,9 @@ fromApp app = do
 
 -- | Convert the controller into an 'Application'. This can be used to
 -- directly run the controller with 'server', for example.
-toApp :: WebMonad m => Controller config m () -> config -> Application m
-toApp ctrl cfg req = do
-  cs <- runController ctrl cfg req
+toApp :: WebMonad m => ControllerT m () -> Application m
+toApp ctrl req = do
+  cs <- runController ctrl req
   return $ case cs of
             Done resp -> resp
             _         -> serverError "Unhandled case"
@@ -172,7 +156,7 @@ toApp ctrl cfg req = do
 -- would return @["bar"]@, but
 -- @queryParam \"zap\"@
 -- would return @[]@.
-queryParams :: (MonadController config w m, Parseable a)
+queryParams :: (MonadController w m, Parseable a)
             => Strict.ByteString -- ^ Parameter name
             -> m [a]
 queryParams varName = do
@@ -213,43 +197,21 @@ instance {-# OVERLAPPABLE #-} (Read a, Typeable a) => Parseable a where
 -- | Returns the value of the given request header or 'Nothing' if it is not
 -- present in the HTTP request.
 requestHeader :: WebMonad m
-              => HeaderName -> Controller config m (Maybe Strict.ByteString)
+              => HeaderName -> ControllerT m (Maybe Strict.ByteString)
 requestHeader name = lookup name . reqHeaders <$> request
 
 -- | Redirect back to the referer. If the referer header is not present
 -- 'redirectTo' root (i.e., @\/@).
-redirectBack :: WebMonad m => Controller s m ()
+redirectBack :: WebMonad m => ControllerT m ()
 redirectBack = redirectBackOr (redirectTo "/")
 
 -- | Redirect back to the referer. If the referer header is not present
 -- fallback on the given 'Response'.
 redirectBackOr :: WebMonad m
                => Response -- ^ Fallback response
-               -> Controller s m ()
+               -> ControllerT m ()
 redirectBackOr def = do
   mrefr <- requestHeader "referer"
   case mrefr of
     Just refr -> respond $ redirectTo refr
     Nothing   -> respond def
-
--- -- | Log text using app-specific logger.
--- log :: WebMonad m => LogLevel -> String -> Controller s m ()
--- log level str = Controller $ \s0 (Logger logger) _ -> do
---    logger level str
---    return (Working (), s0)
-
--- | A logger is simply a function that takes the 'LogLevel' and string to
--- write, and produces an action which when executed may log the string. What
--- it means to log is by choice left up to the application.
-newtype Logger m = Logger (LogLevel -> String -> m ())
-
--- | Severity of logging inforamation following RFC5424.
-data LogLevel = EMERGENCY
-              | ALERT
-              | CRITICAL
-              | ERROR
-              | WARNING
-              | NOTICE
-              | INFO
-              | DEBUG 
-              deriving (Show, Eq, Ord)

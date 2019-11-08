@@ -21,7 +21,8 @@ library
                        Frankie.Server,
                        Frankie.Responses,
                        Frankie.Controller,
-                       Frankie.Loggers
+                       Frankie.Config,
+                       Frankie.Log
   build-depends:       ansi-terminal >= 0.6.2.1,
                        base          >= 4.7 && < 6,
                        bytestring    >= 0.10,
