@@ -10,7 +10,6 @@
 
 module Frankie.Auth where
 
-import Control.Monad.Trans
 import Control.Monad ((>=>))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
